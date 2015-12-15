@@ -1,0 +1,76 @@
+apply plugin: 'idea'
+
+// Blacklist of configurations whose dependencies are resolved too early to change
+def configBlacklist = ['caplet', 'capsule', 'mavenCaplet']
+
+def subprojectIds = []
+def subprojectArtifacts = [:]
+
+subprojects {
+    afterEvaluate { proj ->
+        // add existing artifacts for projects with a defined groupId
+        if (!proj.hasProperty('groupId'))
+            return
+
+        def groupId = proj.groupId
+
+        def archives = proj.configurations.findByName('archives')
+        if (archives != null) {
+            archives.artifacts.each { art ->
+                subprojectIds.add([group: groupId, module: art.name])
+                subprojectArtifacts["${groupId}:${art.name}"] = proj
+            }
+        }
+    }
+}
+
+def  modifyDependencies = { proj, conf, deps ->
+    logger.info("Evaluating configuration ($conf)")
+
+    // Exclude external dependencies for local projects.
+    subprojectIds.each { artifact ->
+        conf.exclude artifact
+    }
+
+    deps.dependencies.all { dep ->
+        if (dep instanceof ExternalModuleDependency) {
+            def targetProject = subprojectArtifacts["${dep.group}:${dep.name}"]
+            if (targetProject != null) {
+                if (dep.artifacts.isEmpty()) {
+                    proj.dependencies.add(conf.name, proj.dependencies.project(
+                            path: ":${dep.name}"
+                    ))
+                } else {
+                    dep.artifacts.each { art ->
+                        def configName = art.classifier
+
+                        proj.dependencies.add(conf.name, proj.dependencies.project(
+                                path: ":${dep.name}", configuration: configName
+                        ))
+                    }
+                }
+            }
+        }
+    }
+}
+
+// We need to modify dependencies after
+// *all* projects are evaluated (so we have a full
+// list of publications as well as their *unresolved* dependencies,
+// but before the task graph is ready (otherwise we won't be able to
+// add our new project dependencies to the compile and runtime classes.
+gradle.projectsEvaluated {
+
+    subprojects { proj ->
+
+        configurations.all { conf ->
+            if (conf.name in configBlacklist)
+                return;
+
+            // Depend on relevant local modules
+            // Kludgy, but so far it works.
+            modifyDependencies(proj, conf, conf.incoming)
+
+        }
+    }
+}

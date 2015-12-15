@@ -1,0 +1,9 @@
+[submodule "qilin"]
+	path = qilin
+	url = ../qilin.git
+[submodule "inchworm"]
+	path = inchworm
+	url = ../inchworm.git
+[submodule "examples"]
+	path = examples
+	url = ../inchworm-examples.git
